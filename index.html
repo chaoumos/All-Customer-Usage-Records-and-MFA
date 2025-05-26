@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PC API - All Customer Usage Records (Azure Plan, Budget)</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        #accessToken { width: 400px; margin-bottom: 10px; }
+        table { border-collapse: collapse; margin-top: 20px; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        #logArea {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            height: 200px;
+            overflow-y: scroll;
+            background-color: #f9f9f9;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .log-error { color: red; }
+        .log-warn { color: orange; }
+        .log-info { color: blue; }
+        .log-success { color: green; }
+        #status { margin-top: 10px; font-style: italic; }
+    </style>
+</head>
+<body>
+    <h2>PC API: Retrieve Customer Usage Records (Azure Plan Status & Budget)</h2>
+    <label for="accessToken">Enter Access Token:</label><br>
+    <input type="text" id="accessToken" placeholder="Paste access token here"><br>
+    <button onclick="fetchUsageData()" id="fetchButton">Fetch Usage Records</button>
+
+    <div id="status"></div>
+    <div id="results">
+        <table border="1" id="customerTable">
+            <thead>
+                <tr>
+                    <th>Customer Name</th>
+                    <th>Customer ID</th>
+                    <th>Has Azure Plan (isUpgraded)</th>
+                    <th>Budget Amount (€)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Rows will be inserted here -->
+            </tbody>
+        </table>
+    </div>
+    <h3>Logs:</h3>
+    <div id="logArea"></div>
+
+    <script>
+        const BASE_URL = "https://api.partnercenter.microsoft.com/v1";
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY_MS = 2000; // 2 seconds
+
+        const logArea = document.getElementById("logArea");
+        const statusDiv = document.getElementById("status");
+        const fetchButton = document.getElementById("fetchButton");
+
+        function logMessage(message, type = "info") {
+            const timestamp = new Date().toISOString();
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
+            logEntry.classList.add(`log-${type}`);
+            logArea.appendChild(logEntry);
+            logArea.scrollTop = logArea.scrollHeight; // Auto-scroll
+
+            switch (type) {
+                case "error": console.error(message); break;
+                case "warn": console.warn(message); break;
+                default: console.log(message);
+            }
+        }
+
+        async function fetchWithRetry(url, options, attempt = 1) {
+            logMessage(`Attempt ${attempt}: Fetching ${url}`);
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    const errorData = await response.text();
+                    throw new Error(`HTTP error ${response.status}: ${response.statusText}. Body: ${errorData}`);
+                }
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.indexOf("application/json") !== -1) {
+                    const text = await response.text();
+                    return text ? JSON.parse(text) : {};
+                }
+                return {};
+            } catch (error) {
+                logMessage(`Error on attempt ${attempt} for ${url}: ${error.message}`, "warn");
+                if (attempt < MAX_RETRIES) {
+                    logMessage(`Retrying in ${RETRY_DELAY_MS / 1000}s...`, "warn");
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+                    return fetchWithRetry(url, options, attempt + 1);
+                } else {
+                    logMessage(`Max retries reached for ${url}. Last error: ${error.message}`, "error");
+                    throw error;
+                }
+            }
+        }
+
+        async function fetchUsageData() {
+            const token = document.getElementById("accessToken").value;
+            if (!token) {
+                alert("Please enter an access token.");
+                logMessage("Access token is missing.", "error");
+                return;
+            }
+
+            fetchButton.disabled = true;
+            statusDiv.textContent = "Starting data fetch...";
+            logMessage("Starting customer usage records retrieval process.");
+
+            const tableBody = document.getElementById("customerTable").getElementsByTagName('tbody')[0];
+            tableBody.innerHTML = "";
+            logArea.innerHTML = "";
+
+            const baseHeaders = {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json",
+                "Accept": "application/json" // Good practice, and API docs show it
+            };
+
+            let allUsageRecords = [];
+            let nextContinuationToken = null;
+            let page = 1;
+            const MAX_PAGES_DEBUG = 500; // Safety break
+
+            try {
+                logMessage("Fetching all customer usage records (paginated)...");
+                do {
+                    if (page > MAX_PAGES_DEBUG) {
+                        logMessage(`ERROR: Reached MAX_PAGES_DEBUG (${MAX_PAGES_DEBUG}). Stopping pagination. Check token logic.`, "error");
+                        break;
+                    }
+
+                    let usageRecordsUrl = `${BASE_URL}/customers/usagerecords`;
+                    const currentRequestHeaders = { ...baseHeaders };
+
+                    if (nextContinuationToken) {
+                        currentRequestHeaders["MS-ContinuationToken"] = nextContinuationToken;
+                        logMessage(`Page ${page}: Requesting with MS-ContinuationToken: ${nextContinuationToken.substring(0, 30)}...`);
+                    } else {
+                        logMessage(`Page ${page}: Requesting first page.`);
+                    }
+
+                    statusDiv.textContent = `Fetching page ${page} of usage records...`;
+                    logMessage(`Fetching usage records page ${page}. URL: ${usageRecordsUrl}`);
+
+                    let usageResponse;
+                    try {
+                        // Using fetchWithRetry for the main paginated call as well
+                        usageResponse = await fetchWithRetry(usageRecordsUrl, { headers: currentRequestHeaders });
+                    } catch (pageFetchError) {
+                        logMessage(`Failed to fetch page ${page} of usage records after retries: ${pageFetchError.message}`, "error");
+                        statusDiv.textContent = `Error fetching page ${page}: ${pageFetchError.message}. Process halted.`;
+                        nextContinuationToken = null; // Stop pagination
+                        throw pageFetchError; // Propagate to outer catch for final cleanup
+                    }
+
+
+                    if (usageResponse && usageResponse.items) {
+                        allUsageRecords = allUsageRecords.concat(usageResponse.items);
+                        logMessage(`Page ${page}: Fetched ${usageResponse.items.length} usage records. Total fetched: ${allUsageRecords.length}.`);
+                        logMessage(`Page ${page} Response: totalCount=${usageResponse.totalCount}, continuationToken=${usageResponse.continuationToken ? usageResponse.continuationToken.substring(0,30)+'...' : 'null'}`);
+
+                        if (usageResponse.continuationToken && usageResponse.continuationToken !== "") {
+                            nextContinuationToken = usageResponse.continuationToken;
+                        } else {
+                            nextContinuationToken = null;
+                            logMessage("No valid continuationToken in response. Assuming end of usage records list.");
+                        }
+
+                        if (usageResponse.items.length === 0 && nextContinuationToken) {
+                            logMessage(`WARN: Page ${page} returned 0 items but a continuationToken was found. Token: ${nextContinuationToken.substring(0,30)}`, "warn");
+                            // This usually means the next call with this token will confirm the end.
+                        }
+                    } else {
+                        logMessage(`Page ${page}: No 'items' in usage records response or response was not as expected. Stopping pagination.`, "warn");
+                        console.warn("Problematic usageResponse:", usageResponse);
+                        nextContinuationToken = null;
+                    }
+                    page++;
+
+                } while (nextContinuationToken);
+
+                logMessage(`Total usage records fetched: ${allUsageRecords.length}. Now populating table...`, "success");
+                statusDiv.textContent = `Fetched ${allUsageRecords.length} usage records. Populating table...`;
+
+                if (allUsageRecords.length === 0) {
+                    logMessage("No usage records found.", "info");
+                    statusDiv.textContent = "No usage records found to display.";
+                }
+
+                let processedCount = 0;
+                for (const record of allUsageRecords) {
+                    processedCount++;
+                    statusDiv.textContent = `Processing record ${processedCount} of ${allUsageRecords.length}`;
+
+                    // The 'id' in CustomerMonthlyUsageRecord is the CustomerID (TenantID)
+                    // The 'resourceId' in this context is also the CustomerID.
+                    // The 'name' or 'resourceName' is the customer's name.
+                    const customerId = record.id;
+                    const customerName = record.name || record.resourceName || "Unknown Name";
+                    const hasAzurePlan = record.isUpgraded === true; // Explicitly check for true
+
+                    let budgetAmount = "N/A";
+                    if (record.budget && typeof record.budget.amount !== 'undefined' && record.budget.amount !== null) {
+                        // Assuming budget.amount is a number. If it can be a string, parse it.
+                        budgetAmount = `€${record.budget.amount}`;
+                    } else if (hasAzurePlan) {
+                        budgetAmount = "No Budget Set"; // Has Azure Plan but no specific budget amount
+                    }
+                    // If !hasAzurePlan, budget is generally N/A unless specified otherwise
+
+                    const tableRow = tableBody.insertRow();
+                    tableRow.insertCell(0).textContent = customerName;
+                    tableRow.insertCell(1).textContent = customerId;
+                    tableRow.insertCell(2).textContent = hasAzurePlan ? "✅ Yes" : "❌ No";
+                    tableRow.insertCell(3).textContent = budgetAmount;
+
+                    if (processedCount % 20 === 0) { // Yield slightly less frequently
+                        await new Promise(resolve => setTimeout(resolve, 0));
+                    }
+                }
+
+                logMessage("All usage records processed and displayed!", "success");
+                statusDiv.textContent = "All data fetched and displayed!";
+
+            } catch (error) {
+                logMessage(`Critical error during data fetching: ${error.message}`, "error");
+                statusDiv.textContent = `Error: ${error.message}. Check logs.`;
+            } finally {
+                fetchButton.disabled = false;
+                logMessage("Process finished.", "info");
+            }
+        }
+    </script>
+</body>
+</html> 
