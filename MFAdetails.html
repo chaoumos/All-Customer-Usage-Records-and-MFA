@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,29 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Microsoft Graph MFA Details</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; }
-        h1, h2, h3, h4, h5 { color: #333; }
-        .container { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        h1, h2, h3, h4, h5 { color: #333; border-bottom: 1px solid #ddd; padding-bottom: 5px;}
+        .container { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="password"], input[type="text"] { width: 90%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 3px; }
-        button { padding: 10px 15px; background-color: #0078D4; color: white; border: none; border-radius: 3px; cursor: pointer; margin-right: 10px; }
+        input[type="password"], input[type="text"] { width: calc(100% - 20px); padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { padding: 10px 15px; background-color: #0078D4; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; transition: background-color 0.2s ease-in-out; }
         button:hover { background-color: #005a9e; }
-        pre { background-color: #f0f0f0; padding: 10px; border: 1px solid #ddd; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto;}
+        button:disabled { background-color: #a0a0a0; cursor: not-allowed; }
+        pre { background-color: #f0f0f0; padding: 10px; border: 1px solid #ddd; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto;}
         table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; vertical-align: top; }
-        th { background-color: #e0e0e0; }
-        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 10px auto; display: none; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; word-wrap: break-word; vertical-align: top; }
+        th { background-color: #e9ecef; font-weight: bold; }
+        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #0078D4; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; display: none; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .error { color: red; font-weight: bold; }
+        .error { color: red; font-weight: bold; border-left: 3px solid red; padding-left: 8px;}
         .info { font-style: italic; color: #555; margin-bottom: 10px; font-size: 0.9em; }
-        .filter-options { margin-bottom: 10px; }
-        .filter-options label { display: inline-block; margin-right: 10px; }
-        ul.compact-list { padding-left: 15px; margin-top: 0; margin-bottom: 5px; }
-        ul.compact-list li { margin-bottom: 2px; }
+        .filter-options { margin-bottom: 15px; padding: 10px; background-color: #e9f5ff; border-radius: 4px; }
+        .filter-options label { display: inline-block; margin-right: 15px; font-weight: normal; }
+        ul.compact-list { padding-left: 15px; margin-top: 0; margin-bottom: 5px; list-style-type: none;}
+        .highlight-admin-no-mfa {
+            background-color: #ffeeba !important; /* Yellowish, for warning */
+            font-weight: bold;
+            color: #856404; /* Darker text for readability */
+        }
+        .success { color: green; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>Microsoft Graph MFA Details</h1>
+    <h1>Microsoft Graph MFA Details & CA Policy Analyzer</h1>
 
     <div class="container">
         <h2>1. Provide Access Token</h2>
@@ -36,8 +41,9 @@
         <input type="password" id="accessTokenInput" placeholder="Paste your access token here">
         <p class="info">
             Required permissions: <code>User.Read.All</code> (for user details, <code>perUserMfaState</code>),
-            <code>UserAuthenticationMethod.Read.All</code>,
+            <code>UserAuthenticationMethod.Read.All</code> (for auth methods),
             <code>Policy.Read.All</code> (for CA policies), <code>Directory.Read.All</code> (for user roles, group/role names).
+            Beta endpoints are used for authentication methods.
         </p>
     </div>
 
@@ -48,48 +54,74 @@
                 <input type="checkbox" id="filterAdminRoles" onchange="renderUserTable()"> Filter for Admin Roles
             </label>
         </div>
-        <button onclick="fetchUserMfaDetails()">Get User MFA Registrations & Roles</button>
+        <button onclick="fetchUserMfaDetails()" id="fetchUsersButton">Get User MFA Registrations & Roles</button>
         <div id="userLoader" class="loader"></div>
         <div id="userProcessingStatus" class="info"></div>
         <div id="userMfaResults"></div>
-        <pre id="userMfaError" class="error"></pre>
+        <pre id="userMfaError" class="error" style="display: none;"></pre>
     </div>
 
     <div class="container">
         <h2>3. Analyze Conditional Access Policies for MFA Enforcement & Exclusions</h2>
-        <button onclick="analyzeCAPolicies()">Analyze CA Policies</button>
+        <button onclick="analyzeCAPolicies()" id="analyzeCaButton">Analyze CA Policies</button>
         <div id="caLoader" class="loader"></div>
-        <div id="caProcessingStatus" class.info"></div>
+        <div id="caProcessingStatus" class="info"></div>
         <div id="caResults"></div>
-        <pre id="caError" class="error"></pre>
+        <pre id="caError" class="error" style="display: none;"></pre>
     </div>
+
 
     <script>
         const GRAPH_API_HOST = "https://graph.microsoft.com";
-        let allFetchedUsersData = []; 
-        let userIdToInfoMap = new Map(); // For quick user lookup by analyzeCAPolicies
+        let allFetchedUsersData = [];
+        let userIdToInfoMap = new Map(); // Cache for user details {id: {displayName, userPrincipalName}}
+        let groupIdToNameMap = new Map(); // Cache for group names {id: "displayName"}
+        let roleIdToNameMap = new Map();   // Cache for role names {id: "displayName"}
+        let processedCaPoliciesData = [];
+        let usersWithDetailsProcessedCount = 0;
+        let totalUsersExpected = 0;
 
         const ADMIN_ROLE_DISPLAY_NAMES_LOWERCASE = [
-            "global administrator", "user administrator", "security administrator", "exchange administrator",
-            "sharepoint administrator", "billing administrator", "helpdesk administrator", "privileged role administrator",
-            "conditional access administrator", "application administrator", "cloud application administrator",
-            "intune administrator", "teams administrator", "compliance administrator", "security operator",
-            "security reader", "global reader", "privileged authentication administrator", "authentication administrator",
+            "global administrator",
+            "security administrator",
+            "exchange administrator",
+            "sharepoint administrator",
+            "user administrator",
+            "conditional access administrator",
+            "billing administrator",
+            "helpdesk administrator",
+            "teams administrator",
+            "privileged role administrator",
+            "privileged authentication administrator",
+            "application administrator",
+            "cloud application administrator",
+            "intune administrator",
+            "authentication policy administrator"
+            // Add other relevant admin role display names here, in lowercase
         ];
 
         function getAuthHeader() {
-            const token = document.getElementById('accessTokenInput').value;
-            if (!token) { alert('Please provide an access token.'); return null; }
+            const tokenInput = document.getElementById('accessTokenInput');
+            const token = tokenInput ? tokenInput.value.trim() : '';
+            if (!token) {
+                console.error("getAuthHeader: Access token is empty or whitespace.");
+                return null;
+            }
             return {
-                'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json',
-                'Accept': 'application/json', 'ConsistencyLevel': 'eventual'
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'ConsistencyLevel': 'eventual' // For certain $select queries, especially with $count
             };
         }
 
         async function makeGraphApiCall(endpoint, method = 'GET', body = null, apiVersion = 'v1.0') {
-            // ... (makeGraphApiCall function remains the same as previous version)
             const headers = getAuthHeader();
-            if (!headers) return null;
+            if (!headers) {
+                 const specificError = new Error(`makeGraphApiCall (${endpoint.substring(0,30)}...): Access token is required. Please provide it in section 1.`);
+                 specificError.isTokenMissingError = true;
+                 throw specificError;
+            }
             const url = `${GRAPH_API_HOST}/${apiVersion}${endpoint}`;
             try {
                 const options = { method, headers };
@@ -100,360 +132,498 @@
                 if (!response.ok) {
                     let errorData;
                     try { errorData = await response.json(); } catch (e) { errorData = { error: { message: response.statusText + " (Response not JSON)" } }; }
-                    const errorMessage = `API Error (${response.status}) on ${url}: ${errorData.error?.message || response.statusText}`;
+                    const errorMessage = `API Error (${response.status}) for ${url.substring(0,80)}...: ${errorData.error?.message || response.statusText}`;
+                    if (response.status === 401 || response.status === 403) {
+                        const tokenError = new Error(`API Authorization Error (${response.status}) for ${url.substring(0,80)}...: ${errorData.error?.message || response.statusText}. Your token might be invalid or expired.`);
+                        tokenError.isTokenMissingError = true; // Treat as a token problem
+                        throw tokenError;
+                    }
                     throw new Error(errorMessage);
                 }
-                if (response.status === 204 || response.headers.get("content-length") === "0") { return { value: [] }; }
+                if (response.status === 204 || response.headers.get("content-length") === "0") { return { value: [] }; } // Handle No Content
                 return await response.json();
             } catch (error) {
                 console.error(`Fetch error in makeGraphApiCall for ${url}:`, error);
-                throw error;
+                if (error.isTokenMissingError) throw error; // Re-throw specific token errors
+                throw new Error(`Network or API call error for ${url.substring(0,80)}...: ${error.message}`);
             }
         }
 
-        async function fetchAllPages(endpoint, apiVersion = 'v1.0') {
-            // ... (fetchAllPages function remains the same as previous version)
-            let results = [];
-            let nextLink = endpoint; 
+       async function fetchAllPages(endpoint, apiVersion = 'v1.0', perPageCallback = null) {
+            let resultsArray = [];
+            let totalItemsPassedToCallback = 0;
+            let nextLink = endpoint;
+            const errorDivId = endpoint.includes("/users") ? 'userMfaError' : 'caError';
+            const loaderId = endpoint.includes("/users") ? 'userLoader' : 'caLoader';
+            const errorDisplay = document.getElementById(errorDivId);
+            const loaderDisplay = document.getElementById(loaderId);
+
             while (nextLink) {
-                const currentHeaders = getAuthHeader(); 
-                if (!currentHeaders) { throw new Error("fetchAllPages: Missing auth token for paged request."); }
+                let currentHeaders;
+                try {
+                    currentHeaders = getAuthHeader();
+                    if (!currentHeaders) {
+                        const specificError = new Error("fetchAllPages: Access token became unavailable (input field empty) during paged request. Please provide a token and try again.");
+                        specificError.isTokenMissingError = true;
+                        throw specificError;
+                    }
+                } catch (e) {
+                    if (errorDisplay) { errorDisplay.textContent = e.message; errorDisplay.style.display = 'block'; }
+                    if (loaderDisplay) loaderDisplay.style.display = 'none';
+                    throw e;
+                }
+
                 const urlToFetch = nextLink.startsWith('https://') ? nextLink : `${GRAPH_API_HOST}/${apiVersion}${nextLink}`;
                 try {
                     const response = await fetch(urlToFetch, { headers: currentHeaders });
                     if (!response.ok) {
                         let errorData;
                         try { errorData = await response.json(); } catch (e) { errorData = { error: { message: response.statusText + " (Response not JSON)" } }; }
-                        const errorMessage = `API Paging Error (${response.status}) on ${urlToFetch}: ${errorData.error?.message || response.statusText}`;
+                        const errorMessage = `API Paging Error (${response.status}) on ${urlToFetch.substring(0,80)}...: ${errorData.error?.message || response.statusText}`;
+                         if (response.status === 401 || response.status === 403) {
+                            const tokenError = new Error(`API Authorization Error (${response.status}) for paged request: ${errorData.error?.message || response.statusText}. Your token might be invalid or expired.`);
+                            tokenError.isTokenMissingError = true;
+                            throw tokenError;
+                        }
                         throw new Error(errorMessage);
                     }
                     const data = await response.json();
-                    results = results.concat(data.value);
+                    const pageItems = data.value;
+
+                    if (pageItems && pageItems.length > 0) {
+                        if (perPageCallback) {
+                            await perPageCallback(pageItems); // Allow callback to be async
+                            totalItemsPassedToCallback += pageItems.length;
+                        } else {
+                            resultsArray = resultsArray.concat(pageItems);
+                        }
+                    }
                     nextLink = data['@odata.nextLink'];
-                    if (nextLink) await new Promise(resolve => setTimeout(resolve, 250)); 
+                    if (nextLink) {
+                        console.log("Fetching next page: " + nextLink.substring(0,100) + "...");
+                         // Add a small delay between page fetches
+                         if (perPageCallback) await new Promise(resolve => setTimeout(resolve, 50));
+                    }
                 } catch (error) {
                     console.error(`Paging fetch error for ${urlToFetch}:`, error);
-                    throw error; 
+                    if (errorDisplay) { errorDisplay.textContent = error.message; errorDisplay.style.display = 'block';}
+                    if (loaderDisplay) loaderDisplay.style.display = 'none';
+                    throw error; // Propagate error to stop further processing
                 }
             }
-            return results;
+            return perPageCallback ? totalItemsPassedToCallback : resultsArray;
         }
-        
+
+        async function fetchAndPopulateUserDetails(userObjectInGlobalArray) {
+            let errorOccurredInThisDetailFetch = false;
+            try {
+                const authMethodsResponse = await makeGraphApiCall(`/users/${userObjectInGlobalArray.id}/authentication/methods`, 'GET', null, 'beta');
+                if (authMethodsResponse && authMethodsResponse.value) {
+                    const strongMethods = authMethodsResponse.value.filter(method =>
+                        method['@odata.type'] !== '#microsoft.graph.passwordAuthenticationMethod' &&
+                        method['@odata.type'] !== '#microsoft.graph.emailAuthenticationMethod' // Email is sometimes not considered strong for sign-in
+                    ).map(method => {
+                        let type = method['@odata.type'].split('.').pop().replace('AuthenticationMethod', '');
+                        if (type === 'microsoftAuthenticator') type = `MS Auth (${method.phoneAppVersion ? 'Push/PwdLess' : 'OTP'})`;
+                        if (type === 'fido2') type = `FIDO2 (${method.displayName || 'Key'})`;
+                        if (type === 'phone') type = `Phone (${method.phoneType}: ...${method.phoneNumber?.slice(-4) || 'N/A'})`;
+                        if (type === 'softwareOath') type = 'SW OATH';
+                        return type;
+                    });
+                    userObjectInGlobalArray.authMethodsDisplay = strongMethods.length > 0 ? strongMethods.join('; ') : 'No strong methods';
+                } else { userObjectInGlobalArray.authMethodsDisplay = 'No strong methods (or no methods found)';}
+            } catch (e) {
+                userObjectInGlobalArray.authMethodsDisplay = `Auth Methods Error: ${e.message.substring(0, 30)}...`;
+                console.warn(`Auth methods error for ${userObjectInGlobalArray.userPrincipalName}: ${e.message}`);
+                if(e.isTokenMissingError) { errorOccurredInThisDetailFetch = true; throw e; }
+            }
+
+            try {
+                const rolesResponse = await makeGraphApiCall(`/users/${userObjectInGlobalArray.id}/memberOf/microsoft.graph.directoryRole?$select=displayName,id`, 'GET', null, 'v1.0');
+                if (rolesResponse && rolesResponse.value) {
+                     userObjectInGlobalArray.roles = rolesResponse.value.map(role => ({ displayName: role.displayName, id: role.id }));
+                    userObjectInGlobalArray.roleNamesDisplay = userObjectInGlobalArray.roles.length > 0 ? userObjectInGlobalArray.roles.map(r => r.displayName).join('; ') : 'No directory roles';
+                } else {userObjectInGlobalArray.roleNamesDisplay = 'No directory roles';}
+            } catch (e) {
+                userObjectInGlobalArray.roleNamesDisplay = `Roles Error: ${e.message.substring(0,30)}...`;
+                console.warn(`Roles error for ${userObjectInGlobalArray.userPrincipalName}: ${e.message}`);
+                if(e.isTokenMissingError) { errorOccurredInThisDetailFetch = true; throw e; }
+            }
+
+            usersWithDetailsProcessedCount++;
+            const expectedCount = totalUsersExpected > 0 ? totalUsersExpected : allFetchedUsersData.length;
+            if (document.getElementById('userLoader').style.display !== 'none' || usersWithDetailsProcessedCount <= expectedCount) {
+                document.getElementById('userProcessingStatus').textContent = `Processed details for ${usersWithDetailsProcessedCount} / ${expectedCount} users...`;
+            }
+            renderUserTable(); // Refresh the table
+            if(!errorOccurredInThisDetailFetch) await new Promise(resolve => setTimeout(resolve, 20)); // Small delay for UI to breathe
+        }
+
         async function fetchUserMfaDetails() {
-            // ... (fetchUserMfaDetails function remains largely the same)
-            // Key addition: Populate userIdToInfoMap
             const userMfaErrorDiv = document.getElementById('userMfaError');
             const userLoader = document.getElementById('userLoader');
             const userProcessingStatusDiv = document.getElementById('userProcessingStatus');
+            const fetchButton = document.getElementById('fetchUsersButton');
 
-            allFetchedUsersData = []; 
-            userIdToInfoMap.clear(); // Clear previous map
-            userMfaErrorDiv.textContent = '';
+            allFetchedUsersData = [];
+            userIdToInfoMap.clear();
+            usersWithDetailsProcessedCount = 0;
+            totalUsersExpected = 0;
+            userMfaErrorDiv.textContent = ''; userMfaErrorDiv.style.display = 'none';
             userProcessingStatusDiv.textContent = 'Initializing...';
             userLoader.style.display = 'block';
-            document.getElementById('userMfaResults').innerHTML = '';
-
-            if (!document.getElementById('accessTokenInput').value) {
-                userMfaErrorDiv.textContent = 'Access Token is required.';
-                userLoader.style.display = 'none';
-                userProcessingStatusDiv.textContent = '';
-                return;
-            }
+            fetchButton.disabled = true;
+            renderUserTable(); // Clear previous results
 
             try {
-                userProcessingStatusDiv.textContent = "Fetching all users with their per-user MFA state...";
-                const users = await fetchAllPages('/users?$select=id,userPrincipalName,displayName,perUserMfaState', 'v1.0'); 
-                
-                if (!users || users.length === 0) {
-                    userMfaErrorDiv.textContent = 'No users found or failed to fetch users.';
-                    userLoader.style.display = 'none'; userProcessingStatusDiv.textContent = ''; return;
-                }
-                userProcessingStatusDiv.textContent = `Found ${users.length} users. Processing details for each...`;
-                
-                let usersProcessed = 0;
-                for (const user of users) {
-                    userIdToInfoMap.set(user.id, { // Populate map for CA policy user resolution
-                        displayName: user.displayName || 'N/A', 
-                        userPrincipalName: user.userPrincipalName || 'N/A'
-                    });
+                const perPageUserProcessor = async (usersFromPage) => {
+                    userProcessingStatusDiv.textContent = `Received page with ${usersFromPage.length} users. Adding to list... (Total in list: ${allFetchedUsersData.length + usersFromPage.length})`;
 
-                    let authMethodsDisplay = "N/A";
-                    let userRoles = [];
-                    let userRoleNames = "No roles / Error";
-                    let perUserMfaStateDisplay = user.perUserMfaState || "N/A";
+                    for (const user of usersFromPage) {
+                        if (userIdToInfoMap.has(user.id)) continue;
 
-                    try { /* ... auth methods fetch ... */ 
-                        const authMethodsResponse = await makeGraphApiCall(`/users/${user.id}/authentication/methods`, 'GET', null, 'beta');
-                        if (authMethodsResponse && authMethodsResponse.value) {
-                            const strongMethods = authMethodsResponse.value.filter(method =>
-                                method['@odata.type'] !== '#microsoft.graph.passwordAuthenticationMethod' &&
-                                method['@odata.type'] !== '#microsoft.graph.emailAuthenticationMethod'
-                            ).map(method => {
-                                let type = method['@odata.type'].split('.').pop().replace('AuthenticationMethod', '');
-                                if (type === 'microsoftAuthenticator') type = `MS Auth (${method.phoneAppVersion ? 'Push/PwdLess' : 'OTP'})`;
-                                if (type === 'fido2') type = `FIDO2 (${method.displayName || 'Key'})`;
-                                if (type === 'phone') type = `Phone (${method.phoneType}: ...${method.phoneNumber?.slice(-4) || 'N/A'})`;
-                                if (type === 'softwareOath') type = 'SW OATH';
-                                return type;
+                        const userData = {
+                            id: user.id,
+                            displayName: user.displayName || 'N/A',
+                            userPrincipalName: user.userPrincipalName || 'N/A',
+                            perUserMfaState: user.perUserMfaState || "N/A",
+                            authMethodsDisplay: "Fetching...",
+                            roles: [],
+                            roleNamesDisplay: "Fetching..."
+                        };
+                        allFetchedUsersData.push(userData);
+                        userIdToInfoMap.set(user.id, { displayName: userData.displayName, userPrincipalName: userData.userPrincipalName});
+                    }
+                    renderUserTable(); // Display basic info
+
+                    // Initiate detail fetching concurrently for this page's users
+                    const detailPromises = usersFromPage.map(user => {
+                        const dataRef = allFetchedUsersData.find(u => u.id === user.id);
+                        if (dataRef && dataRef.authMethodsDisplay === "Fetching...") {
+                            return fetchAndPopulateUserDetails(dataRef).catch(e => {
+                                if (e.isTokenMissingError) {
+                                    console.error("Token missing during detail fetch, halting further operations for users.");
+                                    userMfaErrorDiv.textContent = "Token became unavailable during detail processing. Refresh token and retry.";
+                                    userMfaErrorDiv.style.display = 'block';
+                                    throw e; // Re-throw to stop fetchAllPages if it can catch this
+                                } else {
+                                    console.error(`Error fetching details for user ${dataRef.userPrincipalName} (will show as error in table): ${e.message}`);
+                                }
                             });
-                            authMethodsDisplay = strongMethods.length > 0 ? strongMethods.join('; ') : 'No strong methods';
                         }
-                    } catch (e) { authMethodsDisplay = `Error`; }
-                    try { /* ... roles fetch ... */ 
-                        const rolesResponse = await makeGraphApiCall(`/users/${user.id}/memberOf/microsoft.graph.directoryRole?$select=displayName,id`, 'GET', null, 'v1.0');
-                        if (rolesResponse && rolesResponse.value) {
-                             userRoles = rolesResponse.value.map(role => ({ displayName: role.displayName, id: role.id }));
-                            userRoleNames = userRoles.length > 0 ? userRoles.map(r => r.displayName).join('; ') : 'No directory roles';
-                        }
-                    } catch (e) { userRoleNames = `Error`; }
-                    
-                    allFetchedUsersData.push({
-                        id: user.id, displayName: user.displayName || 'N/A',
-                        userPrincipalName: user.userPrincipalName || 'N/A',
-                        perUserMfaState: perUserMfaStateDisplay, authMethodsDisplay: authMethodsDisplay,
-                        roles: userRoles, roleNamesDisplay: userRoleNames 
+                        return Promise.resolve();
                     });
-                    usersProcessed++;
-                    userProcessingStatusDiv.textContent = `Processed ${usersProcessed}/${users.length} users...`;
-                    if (usersProcessed % 10 === 0) { await new Promise(resolve => setTimeout(resolve, 100)); }
+                    // We don't await all detailPromises here to allow pages to load faster
+                    // Errors are handled within the fetchAndPopulateUserDetails or its promise catch
+                };
+
+                userProcessingStatusDiv.textContent = "Fetching users page by page (perUserMfaState, Display Name, UPN)...";
+                // Query for users and select perUserMfaState which is only available on v1.0 for /users
+                totalUsersExpected = await fetchAllPages(
+                    '/users?$select=id,userPrincipalName,displayName,perUserMfaState&$count=true', // Request count for better progress
+                    'v1.0',
+                    perPageUserProcessor
+                );
+
+                if (userLoader.style.display !== 'none' && totalUsersExpected > 0 && userMfaErrorDiv.style.display === 'none') {
+                    userProcessingStatusDiv.textContent = `All ${totalUsersExpected} basic user entries loaded. Detail fetching (Auth Methods, Roles via Beta/v1.0) in progress (${usersWithDetailsProcessedCount}/${totalUsersExpected} done)...`;
+                } else if (totalUsersExpected === 0 && userMfaErrorDiv.style.display === 'none') {
+                     userProcessingStatusDiv.textContent = 'No users found or returned by the API.';
                 }
-                userProcessingStatusDiv.textContent = `All ${users.length} users processed. Rendering table...`;
-                renderUserTable(); 
+
             } catch (error) {
-                userMfaErrorDiv.textContent = `Error: ${error.message}`;
-                userProcessingStatusDiv.textContent = 'Error occurred.';
-            } finally { userLoader.style.display = 'none'; }
+                console.error("fetchUserMfaDetails error:", error);
+                if (userMfaErrorDiv.style.display === 'none' || userMfaErrorDiv.textContent === '') { // Don't overwrite specific token errors
+                    userMfaErrorDiv.textContent = `Error during user data fetch: ${error.message}`;
+                    userMfaErrorDiv.style.display = 'block';
+                }
+                userProcessingStatusDiv.textContent = 'Error occurred. See message above.';
+            } finally {
+                userLoader.style.display = 'none';
+                fetchButton.disabled = false;
+                const expectedCountFinal = totalUsersExpected > 0 ? totalUsersExpected : allFetchedUsersData.length;
+                if (usersWithDetailsProcessedCount === expectedCountFinal && expectedCountFinal > 0 && userMfaErrorDiv.style.display === 'none') {
+                     userProcessingStatusDiv.textContent = `All ${expectedCountFinal} users and their details processed.`;
+                     userProcessingStatusDiv.classList.add("success"); userProcessingStatusDiv.classList.remove("info");
+                } else if (expectedCountFinal > 0 && userMfaErrorDiv.style.display === 'none') {
+                    userProcessingStatusDiv.textContent = `Processing details for ${expectedCountFinal} users (${usersWithDetailsProcessedCount} completed)... Table updates as data arrives. Review table for any individual fetch errors.`;
+                } else if (userMfaErrorDiv.style.display === 'none' && allFetchedUsersData.length === 0) {
+                    userProcessingStatusDiv.textContent = 'No users loaded. Check token or filters.';
+                }
+                renderUserTable(); // Final render
+            }
         }
 
-        function renderUserTable() { /* ... (renderUserTable remains the same) ... */ 
+        function renderUserTable() {
             const userMfaResultsDiv = document.getElementById('userMfaResults');
             const filterAdminRolesCheckbox = document.getElementById('filterAdminRoles');
             const userProcessingStatusDiv = document.getElementById('userProcessingStatus');
-            userMfaResultsDiv.innerHTML = ''; 
-            if (allFetchedUsersData.length === 0 && userLoader.style.display === 'none') {
-                userProcessingStatusDiv.textContent = 'No user data. Click "Get User MFA Registrations & Roles".'; return;
-            }
-            let usersToDisplay = allFetchedUsersData;
-            if (filterAdminRolesCheckbox.checked) {
-                usersToDisplay = allFetchedUsersData.filter(user => 
-                    user.roles.some(role => ADMIN_ROLE_DISPLAY_NAMES_LOWERCASE.includes(role.displayName.toLowerCase()))
+
+            let usersToDisplay = [...allFetchedUsersData];
+
+            if (filterAdminRolesCheckbox.checked && usersToDisplay.length > 0) {
+                 usersToDisplay = usersToDisplay.filter(user =>
+                    user.roles && user.roles.some(role => role.displayName && ADMIN_ROLE_DISPLAY_NAMES_LOWERCASE.includes(role.displayName.toLowerCase()))
                 );
             }
-            if (userLoader.style.display === 'none') {
-                userProcessingStatusDiv.textContent = `Displaying ${usersToDisplay.length} of ${allFetchedUsersData.length} users` +
-                                                    (filterAdminRolesCheckbox.checked ? ' (Admin Roles filter applied).' : '.');
+            
+            // Update status text only if not actively loading or showing an error
+            if (document.getElementById('userLoader').style.display === 'none' && document.getElementById('userMfaError').style.display === 'none') {
+                if (allFetchedUsersData.length === 0 && !userProcessingStatusDiv.textContent.startsWith("Error")) {
+                     userProcessingStatusDiv.textContent = 'No user data. Click "Get User MFA Registrations & Roles".';
+                } else if (!userProcessingStatusDiv.textContent.includes("processed") && !userProcessingStatusDiv.textContent.includes("Processing")) {
+                    const expectedCount = totalUsersExpected > 0 ? totalUsersExpected : allFetchedUsersData.length;
+                     userProcessingStatusDiv.textContent = `Displaying ${usersToDisplay.length} of ${allFetchedUsersData.length} users (Total listed: ${expectedCount})` +
+                                                    (filterAdminRolesCheckbox.checked ? ' (Admin Roles filter applied).' : '.') +
+                                                    (usersWithDetailsProcessedCount < expectedCount ? ` (${usersWithDetailsProcessedCount} details processed)`: ' (All details processed)');
+                }
             }
-            let tableHtml = `<p class="info">...</p><table><thead><tr>
-                            <th style="width: 20%;">Display Name</th><th style="width: 25%;">User Principal Name</th>
-                            <th style="width: 15%;">perUserMfaState</th> <th style="width: 20%;">Registered Strong Auth Methods</th>
-                            <th style="width: 20%;">User Roles</th></tr></thead><tbody>`;
+
+
+            let tableHtml = `<p class="info">This table shows users, their <code>perUserMfaState</code> (legacy MFA status, if available), their registered strong authentication methods (Beta API), and their assigned Microsoft Entra directory roles. Rows highlighted in yellow indicate admin users with no strong MFA methods registered. The <code>perUserMfaState</code> typically refers to older MFA configurations and may not reflect MFA enforced by Conditional Access. It is often "Unknown" or "N/A" for cloud-only MFA setups. </p>
+                <table><thead><tr>
+                    <th style="width: 20%;">Display Name</th><th style="width: 25%;">User Principal Name</th>
+                    <th style="width: 15%;">perUserMfaState</th> <th style="width: 20%;">Registered Strong Auth Methods</th>
+                    <th style="width: 20%;">User Roles</th></tr></thead><tbody>`;
+
             if (usersToDisplay.length === 0) {
-                tableHtml += `<tr><td colspan="5">No users match or no data loaded.</td></tr>`;
+                tableHtml += `<tr><td colspan="5">No users to display. ${allFetchedUsersData.length > 0 ? 'Try clearing filters.' : 'Fetch data or check for errors.'}</td></tr>`;
             } else {
                 usersToDisplay.forEach(user => {
-                    tableHtml += `<tr><td>${user.displayName}</td><td>${user.userPrincipalName}</td>
-                                  <td>${user.perUserMfaState}</td><td>${user.authMethodsDisplay}</td>
-                                  <td>${user.roleNamesDisplay}</td></tr>`;
+                    let highlightClass = '';
+                    const isUserAdmin = user.roles && user.roles.some(role =>
+                        role.displayName && ADMIN_ROLE_DISPLAY_NAMES_LOWERCASE.includes(role.displayName.toLowerCase())
+                    );
+                    const hasNoStrongMfa = user.authMethodsDisplay === 'No strong methods' || user.authMethodsDisplay === 'No strong methods (or no methods found)';
+
+                    if (isUserAdmin && hasNoStrongMfa) {
+                        highlightClass = 'highlight-admin-no-mfa';
+                    }
+
+                    tableHtml += `<tr class="${highlightClass}">
+                                    <td>${user.displayName}</td>
+                                    <td>${user.userPrincipalName}</td>
+                                    <td>${user.perUserMfaState}</td>
+                                    <td>${user.authMethodsDisplay}</td>
+                                    <td>${user.roleNamesDisplay}</td>
+                                  </tr>`;
                 });
             }
-            tableHtml += "</tbody></table>"; userMfaResultsDiv.innerHTML = tableHtml;
+            tableHtml += "</tbody></table>";
+            userMfaResultsDiv.innerHTML = tableHtml;
         }
 
-        // --- Helper to get user info (uses cache or fetches) ---
         async function getUserInfo(userId) {
+            if (!userId) return "N/A";
             if (userIdToInfoMap.has(userId)) {
-                return userIdToInfoMap.get(userId);
+                const cached = userIdToInfoMap.get(userId);
+                return `${cached.displayName} (${cached.userPrincipalName})`;
             }
-            try { // Fallback fetch if not in pre-loaded map
+            try {
                 const user = await makeGraphApiCall(`/users/${userId}?$select=displayName,userPrincipalName`);
-                if (user) {
-                    const userInfo = { displayName: user.displayName || `ID: ${userId}`, userPrincipalName: user.userPrincipalName || '(N/A)'};
-                    userIdToInfoMap.set(userId, userInfo); // Cache for future
-                    return userInfo;
-                }
-            } catch (e) { console.warn(`Fallback failed to fetch user ${userId}: ${e.message}`); }
-            return { displayName: `ID: ${userId}`, userPrincipalName: '(lookup failed)' };
+                userIdToInfoMap.set(userId, {displayName: user.displayName, userPrincipalName: user.userPrincipalName});
+                return `${user.displayName} (${user.userPrincipalName})`;
+            } catch (e) {
+                console.warn(`Failed to get user info for ${userId}: ${e.message}`);
+                return `User ID: ${userId} (Error fetching details)`;
+            }
         }
 
         async function getGroupDisplayName(groupId) {
+            if (!groupId) return "N/A";
+            if (groupIdToNameMap.has(groupId)) return groupIdToNameMap.get(groupId);
             try {
                 const group = await makeGraphApiCall(`/groups/${groupId}?$select=displayName`);
-                return group.displayName || `ID: ${groupId}`;
-            } catch (e) { console.warn(`Failed to fetch group ${groupId}: ${e.message}`); return `ID: ${groupId} (lookup failed)`; }
+                groupIdToNameMap.set(groupId, group.displayName);
+                return group.displayName;
+            } catch (e) {
+                console.warn(`Failed to get group name for ${groupId}: ${e.message}`);
+                return `Group ID: ${groupId} (Error fetching name)`;
+            }
         }
 
-        async function getRoleDisplayName(roleId) { // Role ID is often the roleTemplateId for built-in
-             try {
-                // Try fetching by ID first. If it's a custom role, this works.
-                // For built-in roles, their main ID is often the templateId, but they also get an object ID when activated.
-                // The /directoryRoles endpoint lists activated roles.
-                const role = await makeGraphApiCall(`/directoryRoles/${roleId}?$select=displayName`);
-                return role.displayName || `ID: ${roleId}`;
+        async function getRoleDisplayName(roleId) { // Directory Role ID (template ID)
+            if (!roleId) return "N/A";
+            if (roleIdToNameMap.has(roleId)) return roleIdToNameMap.get(roleId);
+            try {
+                // Directory roles are more complex to get by ID if it's a template ID
+                // This is a simplified placeholder. A full solution might list all directoryRoles once.
+                // For CA, roleId often refers to a role *template* ID.
+                // Let's assume for now we try to fetch it as if it were a direct role object,
+                // or have a predefined map.
+                // A common pattern is to list all /directoryRoles and cache them.
+                // For simplicity here, we'll just return the ID or a placeholder.
+                // Pre-populate with known ones if possible, or fetch all directory roles at startup.
+                 const role = await makeGraphApiCall(`/directoryRoles/${roleId}?$select=displayName`); // This might fail if roleId is a templateId
+                 roleIdToNameMap.set(roleId, role.displayName);
+                 return role.displayName;
             } catch (e) {
-                console.warn(`Failed to fetch role ${roleId} directly: ${e.message}. Trying template lookup if applicable.`);
-                // Built-in roles might not be found by their GUID in /directoryRoles/{id} if it's a template ID.
-                // This part is tricky as CA policies store the *activated role's object ID*.
-                // For simplicity, if direct lookup fails, we return the ID.
-                // A more robust solution would be to list all /directoryRoles and map template IDs, but that's more complex.
-                return `ID: ${roleId} (lookup failed or template ID)`;
+                console.warn(`Failed to get role name for ${roleId}: ${e.message}. It might be a role template ID.`);
+                // Fallback: check against known admin role IDs (if you have them) or just return the ID.
+                // For this example, we'll just return the ID.
+                roleIdToNameMap.set(roleId, `Role ID: ${roleId}`); // Cache the failure/ID
+                return `Role ID: ${roleId}`;
             }
         }
 
 
         async function analyzeCAPolicies() {
-            const caResultsDiv = document.getElementById('caResults');
             const caErrorDiv = document.getElementById('caError');
             const caLoader = document.getElementById('caLoader');
             const caProcessingStatusDiv = document.getElementById('caProcessingStatus');
+            const analyzeButton = document.getElementById('analyzeCaButton');
 
-            caResultsDiv.innerHTML = '';
-            caErrorDiv.textContent = '';
-            caProcessingStatusDiv.textContent = '';
+            processedCaPoliciesData = [];
+            caErrorDiv.textContent = ''; caErrorDiv.style.display = 'none';
+            caProcessingStatusDiv.textContent = 'Initializing CA Policy Analysis...';
             caLoader.style.display = 'block';
+            analyzeButton.disabled = true;
+            renderCaPoliciesTable([]); // Clear previous
 
-            if (!document.getElementById('accessTokenInput').value) {
-                caErrorDiv.textContent = 'Access Token is required.';
-                caLoader.style.display = 'none'; return;
-            }
-            if (userIdToInfoMap.size === 0) {
-                caProcessingStatusDiv.textContent = "User names not pre-loaded. Run 'Get User MFA Registrations & Roles' first for better name resolution in exclusions. Fetching policies...";
-            } else {
-                caProcessingStatusDiv.textContent = "Fetching policies...";
-            }
-            
             try {
+                caProcessingStatusDiv.textContent = 'Fetching Conditional Access policies...';
                 const policies = await fetchAllPages('/identity/conditionalAccess/policies', 'v1.0');
-                if (!policies || policies.length === 0) {
-                    caResultsDiv.innerHTML = '<p>No Conditional Access policies found.</p>';
-                    caLoader.style.display = 'none'; caProcessingStatusDiv.textContent = ''; return;
-                }
-                
-                const mfaPolicies = policies.filter(policy =>
-                    policy.state === 'enabled' && policy.grantControls &&
-                    ( (policy.grantControls.builtInControls && policy.grantControls.builtInControls.includes('mfa')) ||
-                      policy.grantControls.authenticationStrength )
-                );
+                caProcessingStatusDiv.textContent = `Fetched ${policies.length} policies. Analyzing details...`;
 
-                if (mfaPolicies.length === 0) {
-                    caResultsDiv.innerHTML = '<p>No active CA policies found enforcing MFA.</p>';
-                    caLoader.style.display = 'none'; caProcessingStatusDiv.textContent = ''; return;
+                if (policies.length === 0) {
+                    caProcessingStatusDiv.textContent = 'No Conditional Access policies found.';
+                    renderCaPoliciesTable([]);
+                    return;
                 }
 
-                caProcessingStatusDiv.textContent = `Found ${mfaPolicies.length} MFA policies. Resolving exclusion details...`;
-                
-                let processedPoliciesData = [];
-                for (let i = 0; i < mfaPolicies.length; i++) {
-                    const policy = mfaPolicies[i];
-                    caProcessingStatusDiv.textContent = `Processing policy ${i + 1}/${mfaPolicies.length}: ${policy.displayName.substring(0,30)}...`;
+                let processedCount = 0;
+                for (const policy of policies) {
+                    const policyDetail = {
+                        id: policy.id,
+                        displayName: policy.displayName,
+                        state: policy.state,
+                        users: 'N/A',
+                        apps: 'N/A',
+                        grantControls: 'N/A',
+                        sessionControls: 'N/A',
+                        mfaEnforced: false,
+                        exclusions: 'None'
+                    };
 
-                    let grantControlDisplay = "MFA Required";
-                    if (policy.grantControls.authenticationStrength) {
-                        grantControlDisplay = `Auth Strength: ${policy.grantControls.authenticationStrength.id}`;
-                    } else if (policy.grantControls.operator) {
-                        grantControlDisplay = `${policy.grantControls.operator} of: ${policy.grantControls.builtInControls.join(', ')}`;
-                    }
-
-                    let includedSummary = [];
-                    if (policy.conditions.users) {
-                        const usersCond = policy.conditions.users;
-                        if (usersCond.includeUsers?.length) includedSummary.push(`Users: ${usersCond.includeUsers.join(', ')}`);
-                        if (usersCond.includeGroups?.length) includedSummary.push(`Groups: ${usersCond.includeGroups.join(', ')}`);
-                        if (usersCond.includeRoles?.length) includedSummary.push(`Roles: ${usersCond.includeRoles.join(', ')}`);
-                        if (usersCond.includeGuestsOrExternalUsers) includedSummary.push(`Guests/External`);
-                    }
-                    if (includedSummary.length === 0 && policy.conditions.users?.includeUsers?.includes("All")) {
-                         includedSummary.push("All Users");
-                    } else if (includedSummary.length === 0) {
-                         includedSummary.push("All Users (Implicit)");
-                    }
-
-
-                    let excludedUsersDisplay = [];
-                    if (policy.conditions.users?.excludeUsers?.length) {
-                        for (const userId of policy.conditions.users.excludeUsers) {
-                            if (userId === "All" || userId === "GuestsOrExternalUsers") { // Handle special strings
-                                excludedUsersDisplay.push(userId);
-                            } else {
-                                const userInfo = await getUserInfo(userId);
-                                excludedUsersDisplay.push(`${userInfo.displayName} &lt;${userInfo.userPrincipalName}&gt;`);
+                    // Users
+                    if (policy.conditions?.users) {
+                        let userIncludes = [];
+                        if (policy.conditions.users.includeUsers?.length) {
+                            for(const userId of policy.conditions.users.includeUsers) {
+                                if (userId === "All") { userIncludes.push("All Users"); break;}
+                                if (userId === "GuestsOrExternalUsers") { userIncludes.push("Guests/External Users"); continue;}
+                                userIncludes.push(await getUserInfo(userId));
                             }
                         }
+                        if (policy.conditions.users.includeGroups?.length) {
+                             for(const groupId of policy.conditions.users.includeGroups) userIncludes.push(`Group: ${await getGroupDisplayName(groupId)}`);
+                        }
+                        if (policy.conditions.users.includeRoles?.length) {
+                            for(const roleId of policy.conditions.users.includeRoles) userIncludes.push(`Role: ${await getRoleDisplayName(roleId)}`);
+                        }
+                        policyDetail.users = userIncludes.length > 0 ? userIncludes.join('; ') : 'Not specified';
+
+                        let userExcludes = [];
+                         if (policy.conditions.users.excludeUsers?.length) {
+                            for(const userId of policy.conditions.users.excludeUsers) userExcludes.push(await getUserInfo(userId));
+                        }
+                        if (policy.conditions.users.excludeGroups?.length) {
+                             for(const groupId of policy.conditions.users.excludeGroups) userExcludes.push(`Group (Exclude): ${await getGroupDisplayName(groupId)}`);
+                        }
+                        if (policy.conditions.users.excludeRoles?.length) {
+                            for(const roleId of policy.conditions.users.excludeRoles) userExcludes.push(`Role (Exclude): ${await getRoleDisplayName(roleId)}`);
+                        }
+                        if (userExcludes.length > 0) policyDetail.exclusions = userExcludes.join('; ');
                     }
 
-                    let excludedGroupsDisplay = [];
-                     if (policy.conditions.users?.excludeGroups?.length) {
-                        for (const groupId of policy.conditions.users.excludeGroups) {
-                            const groupName = await getGroupDisplayName(groupId);
-                            excludedGroupsDisplay.push(groupName);
-                        }
+                    // Applications
+                    if (policy.conditions?.applications?.includeApplications?.length) {
+                        policyDetail.apps = policy.conditions.applications.includeApplications.includes("All") ? "All Cloud Apps" : policy.conditions.applications.includeApplications.join('; ');
+                    } else {
+                        policyDetail.apps = "Not specified";
                     }
 
-                    let excludedRolesDisplay = [];
-                    if (policy.conditions.users?.excludeRoles?.length) {
-                        for (const roleId of policy.conditions.users.excludeRoles) {
-                            const roleName = await getRoleDisplayName(roleId);
-                            excludedRolesDisplay.push(roleName);
+
+                    // Grant Controls
+                    if (policy.grantControls) {
+                        let grantTexts = [];
+                        if (policy.grantControls.operator === 'OR' || policy.grantControls.operator === 'AND') {
+                            grantTexts = policy.grantControls.builtInControls || [];
+                            if (policy.grantControls.customAuthenticationFactors?.length) grantTexts.push("Custom Auth Factors");
+                            if (policy.grantControls.termsOfUse?.length) grantTexts.push("Terms of Use");
                         }
+                        policyDetail.grantControls = grantTexts.join(', ') || 'Not specified';
+                        if (grantTexts.includes('mfa')) policyDetail.mfaEnforced = true;
                     }
-                    
-                    processedPoliciesData.push({
-                        name: policy.displayName,
-                        state: policy.state,
-                        grantControl: grantControlDisplay,
-                        includedSummary: includedSummary.join('; ') || 'N/A',
-                        excludedUsers: excludedUsersDisplay.join('; ') || 'None',
-                        excludedGroups: excludedGroupsDisplay.join('; ') || 'None',
-                        excludedRoles: excludedRolesDisplay.join('; ') || 'None'
-                    });
-                     await new Promise(resolve => setTimeout(resolve, 50)); // Small delay after processing each policy
+
+                    // Session Controls (simplified)
+                    if (policy.sessionControls) {
+                        let sessionTexts = [];
+                        if(policy.sessionControls.applicationEnforcedRestrictions) sessionTexts.push("App Enforced Restrictions");
+                        if(policy.sessionControls.cloudAppSecurity) sessionTexts.push("Cloud App Security");
+                        if(policy.sessionControls.signInFrequency) sessionTexts.push(`Sign-in Frequency: ${policy.sessionControls.signInFrequency.value} ${policy.sessionControls.signInFrequency.type}`);
+                        // Add more as needed
+                        policyDetail.sessionControls = sessionTexts.join('; ') || 'None';
+                    }
+
+                    processedCaPoliciesData.push(policyDetail);
+                    processedCount++;
+                    caProcessingStatusDiv.textContent = `Analyzed ${processedCount} / ${policies.length} policies...`;
+                    renderCaPoliciesTable(processedCaPoliciesData); // Incremental render
+                    await new Promise(resolve => setTimeout(resolve, 10)); // tiny delay
                 }
-                renderCaPoliciesTable(processedPoliciesData);
-                caProcessingStatusDiv.textContent = `Displayed ${processedPoliciesData.length} MFA-enforcing CA policies.`;
+                caProcessingStatusDiv.textContent = `Successfully analyzed all ${policies.length} Conditional Access policies.`;
+                caProcessingStatusDiv.classList.add("success"); caProcessingStatusDiv.classList.remove("info");
 
             } catch (error) {
-                caErrorDiv.textContent = `Error: ${error.message}`;
-                caProcessingStatusDiv.textContent = 'Error occurred.';
+                console.error("analyzeCAPolicies error:", error);
+                 if (caErrorDiv.style.display === 'none' || caErrorDiv.textContent === '') {
+                    caErrorDiv.textContent = `Error during CA policy analysis: ${error.message}`;
+                    caErrorDiv.style.display = 'block';
+                }
+                caProcessingStatusDiv.textContent = 'Error occurred. See message above.';
             } finally {
                 caLoader.style.display = 'none';
+                analyzeButton.disabled = false;
             }
         }
 
-        function renderCaPoliciesTable(policiesData) {
+        function renderCaPoliciesTable(policiesDataToRender) {
             const caResultsDiv = document.getElementById('caResults');
-            let html = `<h3>Conditional Access Policies Enforcing MFA</h3>
-                        <p class="info">Table lists enabled policies granting access via MFA or Auth Strength. Exclusions show direct users by name/email, and group/role names (not all members). For full member lists of excluded groups/roles, check Azure portal.</p>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th style="width: 20%;">Policy Name</th>
-                                    <th style="width: 8%;">State</th>
-                                    <th style="width: 15%;">MFA Grant</th>
-                                    <th style="width: 20%;">Included Targets (Summary)</th>
-                                    <th style="width: 15%;">Excluded Users (Direct)</th>
-                                    <th style="width: 11%;">Excluded Groups</th>
-                                    <th style="width: 11%;">Excluded Roles</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
-            
-            if (policiesData.length === 0) {
-                html += `<tr><td colspan="7">No MFA-enforcing policies to display.</td></tr>`;
+            let tableHtml = `<p class="info">This table shows Conditional Access policies, their targets, and whether MFA is part of the grant controls. Check exclusions carefully.</p>
+                <table><thead><tr>
+                    <th style="width:15%">Policy Name</th><th style="width:10%">State</th>
+                    <th style="width:20%">Target Users/Roles/Groups</th>
+                    <th style="width:15%">Target Apps</th>
+                    <th style="width:15%">Grant Controls (MFA?)</th>
+                    <th style="width:15%">Exclusions</th>
+                    <th style="width:10%">Session Controls</th>
+                </tr></thead><tbody>`;
+
+            if (policiesDataToRender.length === 0) {
+                tableHtml += `<tr><td colspan="7">No Conditional Access policies to display or data still loading...</td></tr>`;
             } else {
-                policiesData.forEach(policy => {
-                    html += `<tr>
-                                <td>${policy.name}</td>
-                                <td>${policy.state}</td>
-                                <td>${policy.grantControl}</td>
-                                <td><ul class="compact-list">${policy.includedSummary.split('; ').map(s => `<li>${s}</li>`).join('')}</ul></td>
-                                <td><ul class="compact-list">${policy.excludedUsers.split('; ').map(s => `<li>${s}</li>`).join('')}</ul></td>
-                                <td><ul class="compact-list">${policy.excludedGroups.split('; ').map(s => `<li>${s}</li>`).join('')}</ul></td>
-                                <td><ul class="compact-list">${policy.excludedRoles.split('; ').map(s => `<li>${s}</li>`).join('')}</ul></td>
-                             </tr>`;
+                policiesDataToRender.forEach(policy => {
+                    tableHtml += `<tr>
+                                    <td>${policy.displayName}</td>
+                                    <td>${policy.state}</td>
+                                    <td>${policy.users}</td>
+                                    <td>${policy.apps}</td>
+                                    <td style="${policy.mfaEnforced ? 'background-color:#d4edda; color:#155724;' : ''}">${policy.grantControls}${policy.mfaEnforced ? ' <strong>(MFA)</strong>' : ''}</td>
+                                    <td style="${policy.exclusions !== 'None' ? 'background-color:#fff3cd; color:#856404;' : ''}">${policy.exclusions}</td>
+                                    <td>${policy.sessionControls}</td>
+                                  </tr>`;
                 });
             }
-            html += `</tbody></table>`;
-            caResultsDiv.innerHTML = html;
+            tableHtml += "</tbody></table>";
+            caResultsDiv.innerHTML = tableHtml;
         }
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            renderUserTable(); // Render empty table structure initially
+            renderCaPoliciesTable([]); // Render empty CA table structure
+        });
 
     </script>
 </body>
