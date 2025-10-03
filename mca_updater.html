@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Partner Center MCA Manager</title>
+    <!-- Bootstrap CSS for styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 20px; background-color: #f8f9fa; }
+        .status-badge { font-size: 0.9em; }
+        #logArea { max-height: 200px; overflow-y: auto; background: #fff; font-family: monospace; font-size: 0.85rem; }
+        .table-container { background: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid">
+    <h2 class="mb-4 text-primary"><i class="bi bi-shield-check"></i> Microsoft Customer Agreement (MCA) Manager</h2>
+
+    <div class="row">
+        <!-- Configuration & Load Section -->
+        <div class="col-md-12 mb-3">
+            <div class="card">
+                <div class="card-header bg-dark text-white">1. Configuration & Loading</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="accessToken" class="form-label fw-bold">Partner Center Access Token <span class="text-danger">*</span></label>
+                        <input type="password" class="form-control" id="accessToken" placeholder="Paste your Bearer token here...">
+                        <div class="form-text text-muted">Token is not stored and is used only for current session API calls.</div>
+                    </div>
+                    <button id="btnLoadCustomers" class="btn btn-primary w-100">
+                        <span id="loadSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                        Load & Analyze Customers
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Update Section -->
+        <div class="col-md-12 mb-4">
+            <div class="card border-danger">
+                <div class="card-header bg-danger text-white">2. Bulk Update Operations</div>
+                <div class="card-body">
+                    <p class="card-text small">Enter details of the person attesting to the new agreement, select customers in the table, and click update.</p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="attestFirstName" class="form-label">Attester First Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control update-input" id="attestFirstName" placeholder="e.g. Jane">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="attestLastName" class="form-label">Attester Last Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control update-input" id="attestLastName" placeholder="e.g. Doe">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="attestEmail" class="form-label">Attester Email <span class="text-danger">*</span></label>
+                            <input type="email" class="form-control update-input" id="attestEmail" placeholder="e.g. jane.doe@customer.com">
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Selected for Update: <span id="selectedCount" class="badge bg-secondary">0</span></strong>
+                        </div>
+                        <div>
+                            <button id="btnSelectAllNeeded" class="btn btn-outline-secondary btn-sm me-2" disabled>Select All needing update</button>
+                            <button id="btnUpdateSelected" class="btn btn-danger" disabled>
+                                <span id="updateSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                Update Selected Tenants
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Log -->
+    <div class="card mb-3">
+        <div class="card-header py-1">Activity Log & Status</div>
+        <div class="card-body p-2">
+            <div id="logArea" class="border rounded p-2 text-secondary">Waiting for action...</div>
+            <div class="progress mt-2 d-none" id="progressBarContainer">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Table -->
+    <div class="table-container">
+        <h5 class="card-title">Customer MCA Status <small class="text-muted">(Comparison Date: April 1, 2023)</small></h5>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle" id="customerTable">
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col" width="50">Select</th>
+                        <th scope="col">Customer Name</th>
+                        <th scope="col">Tenant ID</th>
+                        <th scope="col">Partner MCA Date</th>
+                        <th scope="col">Partner Attestation Status</th>
+                        <th scope="col">Self-Signed Status</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">No data loaded yet.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- MAIN JAVASCRIPT LOGIC -->
+<script>
+    // --- CONSTANTS & STATE ---
+    const COMPARISON_DATE = new Date('2023-04-01');
+    let globalToken = null;
+    let customersNeedingUpdateIds = new Set();
+
+    // --- DOM ELEMENTS ---
+    const ui = {
+        tokenInput: document.getElementById('accessToken'),
+        btnLoad: document.getElementById('btnLoadCustomers'),
+        loadSpinner: document.getElementById('loadSpinner'),
+        logArea: document.getElementById('logArea'),
+        tableBody: document.getElementById('tableBody'),
+        progressBarContainer: document.getElementById('progressBarContainer'),
+        progressBar: document.getElementById('progressBar'),
+        inputFn: document.getElementById('attestFirstName'),
+        inputLn: document.getElementById('attestLastName'),
+        inputEmail: document.getElementById('attestEmail'),
+        btnUpdate: document.getElementById('btnUpdateSelected'),
+        updateSpinner: document.getElementById('updateSpinner'),
+        btnSelectAll: document.getElementById('btnSelectAllNeeded'),
+        selectedCount: document.getElementById('selectedCount'),
+        inputsUpdate: document.querySelectorAll('.update-input')
+    };
+
+    // --- LOGGING & UI HELPERS ---
+    function log(message, type = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        let color = 'text-secondary';
+        if (type === 'error') color = 'text-danger fw-bold';
+        if (type === 'success') color = 'text-success';
+        if (type === 'process') color = 'text-primary';
+
+        const entry = document.createElement('div');
+        entry.className = `${color} border-bottom border-light py-1`;
+        entry.innerHTML = `<small>[${timestamp}]</small> ${message}`;
+        ui.logArea.appendChild(entry);
+        ui.logArea.scrollTop = ui.logArea.scrollHeight;
+    }
+
+    function setProgress(percent, show = true) {
+        ui.progressBarContainer.style.display = show ? 'flex' : 'none';
+        ui.progressBar.style.width = `${percent}%`;
+    }
+
+    function updateSelectionState() {
+        const checkedBoxes = document.querySelectorAll('.tenant-select:checked');
+        ui.selectedCount.textContent = checkedBoxes.length;
+        ui.btnUpdate.disabled = checkedBoxes.length === 0;
+    }
+
+    function setControlsDisabled(disabled) {
+        ui.btnLoad.disabled = disabled;
+        ui.btnUpdate.disabled = disabled ? true : document.querySelectorAll('.tenant-select:checked').length === 0;
+        
+        // *** FIX #1: Smarter logic for the "Select All" button ***
+        // Only enable it when not disabled AND there are customers who actually need an update.
+        if (disabled) {
+            ui.btnSelectAll.disabled = true;
+        } else {
+            ui.btnSelectAll.disabled = customersNeedingUpdateIds.size === 0;
+        }
+        
+        ui.inputsUpdate.forEach(input => input.disabled = disabled);
+        document.querySelectorAll('.tenant-select').forEach(cb => cb.disabled = disabled);
+    }
+
+    // ==========================================
+    // --- API FUNCTIONS ---
+    // ==========================================
+
+    async function simpleFetch(url, token, options = {}) {
+        const fetchOptions = {
+            ...options,
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/json',
+                "cache-control": "no-cache",
+                "content-type": "application/json",
+                "expires": "-1",
+                "ms-correlationid": "c0052d92-d8fc-43c8-8345-d295c58cfe76",
+                "ms-partnercenter-client": "Partner Center Web",
+                "ms-requestid": "63fff0f6-47d6-4949-af24-eb957c188bf6",
+                "ocp-apim-subscription-key": "c306f5dd740f4946920822865932a356",
+                "pragma": "no-cache",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site",
+                "x-edge-shopping-flag": "1",
+                "x-locale": "en-us"
+            }
+        };
+        const response = await fetch(url, fetchOptions);
+        if (!response.ok) {
+            let errorDesc = `Status ${response.status}`;
+            try {
+                const errJson = await response.json();
+                errorDesc = `${errJson.code} - ${errJson.description || response.statusText}`;
+            } catch(e) { /* use default statusText */ }
+            throw new Error(errorDesc);
+        }
+        return { data: await response.json(), headers: response.headers };
+    }
+    
+    async function getAllCustomers(token) {
+        let allCustomers = [];
+        let nextLink = `https://api.partnercenter.microsoft.com/v1/customers?size=500`;
+        log("Fetching customer list (this may take multiple pages)...", 'process');
+        while (nextLink) {
+            const url = nextLink.startsWith('http') ? nextLink : `https://api.partnercenter.microsoft.com${nextLink}`;
+            const res = await simpleFetch(url, token);
+            allCustomers = allCustomers.concat(res.data.items);
+            log(`Fetched page. Total customers so far: ${allCustomers.length}`);
+            const linkHeader = res.headers.get('Link');
+            const match = linkHeader ? /<([^>]+)>;\s*rel="next"/.exec(linkHeader) : null;
+            nextLink = match ? match[1] : null;
+        }
+        return allCustomers;
+    }
+
+    async function getCustomerDetails(customerId, token) {
+        const [mcaRes, selfSignRes] = await Promise.allSettled([
+            simpleFetch(`https://api.partnercenter.microsoft.com/v1/customers/${customerId}/agreements`, token),
+            simpleFetch(`https://api.partnercenter.microsoft.com/v1/customers/${customerId}/directSignedMicrosoftCustomerAgreementStatus`, token)
+        ]);
+
+        let partnerMca = null;
+        if (mcaRes.status === 'fulfilled') {
+            partnerMca = mcaRes.value.data.items.find(a => a.type === "MicrosoftCustomerAgreement");
+        }
+
+        let selfSignedStatus = "Unknown/Error";
+        if (selfSignRes.status === 'fulfilled') {
+            selfSignedStatus = selfSignRes.value.data.isSigned === true ? "Signed" : "Not Signed";
+        } else if (selfSignRes.reason.message.includes('404')) {
+            selfSignedStatus = "N/A";
+        }
+
+        return { partnerMca, selfSignedStatus };
+    }
+
+    async function performUpdate(customerId, token, contact) {
+        const url = `https://api.partnercenter.microsoft.com/v1/customers/${customerId}/agreements`;
+        const payload = { ...contact, dateAgreed: new Date().toISOString() };
+        await simpleFetch(url, token, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        return true; 
+    }
+
+    // ==========================================
+    // --- UI WORKFLOW FUNCTIONS ---
+    // ==========================================
+
+    function createTableRow(customer, details) {
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-tenant-id', customer.id);
+
+        let mcaDateStr = "-";
+        let partnerStatusHtml = '<span class="badge bg-secondary status-badge">Not Found</span>';
+        let needsUpdate = false;
+
+        if (details.partnerMca) {
+            const d = new Date(details.partnerMca.dateAgreed);
+            mcaDateStr = d.toISOString().split('T')[0];
+            if (d < COMPARISON_DATE) {
+                partnerStatusHtml = '<span class="badge bg-danger status-badge">Update Required</span>';
+                needsUpdate = true;
+                tr.classList.add('table-warning');
+                customersNeedingUpdateIds.add(customer.id);
+            } else {
+                partnerStatusHtml = '<span class="badge bg-success status-badge">Up to date</span>';
+            }
+        }
+
+        let selfSignClass = details.selfSignedStatus === 'Signed' ? 'text-success fw-bold' : 'text-muted';
+
+        tr.innerHTML = `
+            <td class="text-center">
+                ${needsUpdate ? `<input type="checkbox" class="form-check-input tenant-select" value="${customer.id}">` : ''}
+            </td>
+            <td class="fw-bold">${customer.companyProfile.companyName}</td>
+            <td><small class="text-muted font-monospace">${customer.id}</small></td>
+            <td class="mca-date">${mcaDateStr}</td>
+            <td class="mca-status">${partnerStatusHtml}</td>
+            <td><span class="${selfSignClass}">${details.selfSignedStatus}</span></td>
+        `;
+        return tr;
+    }
+
+    ui.btnLoad.addEventListener('click', async () => {
+        globalToken = ui.tokenInput.value.trim();
+        if (!globalToken) return alert("Please enter your Access Token.");
+
+        ui.logArea.innerHTML = '';
+        ui.tableBody.innerHTML = '<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary"></div><div class="mt-2">Loading...</div></td></tr>';
+        ui.loadSpinner.classList.remove('d-none');
+        customersNeedingUpdateIds.clear(); // Reset the set before loading
+        setControlsDisabled(true);
+        setProgress(0);
+
+        try {
+            const customers = await getAllCustomers(globalToken);
+            log(`Fetched ${customers.length} customers. Starting analysis...`, 'success');
+            ui.tableBody.innerHTML = '';
+
+            for (let i = 0; i < customers.length; i++) {
+                const cust = customers[i];
+                if (i % 5 === 0 || i === customers.length -1) {
+                    log(`Analyzing (${i+1}/${customers.length}): ${cust.companyProfile.companyName}`);
+                    setProgress(((i+1) / customers.length) * 100);
+                }
+                const details = await getCustomerDetails(cust.id, globalToken);
+                ui.tableBody.appendChild(createTableRow(cust, details));
+            }
+            log('Analysis complete.', 'success');
+            document.querySelectorAll('.tenant-select').forEach(cb => cb.addEventListener('change', updateSelectionState));
+            updateSelectionState();
+        } catch (error) {
+            log(`Error: ${error.message}`, 'error');
+            ui.tableBody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">Error loading data. Check log and token.</td></tr>`;
+        } finally {
+            ui.loadSpinner.classList.add('d-none');
+            setControlsDisabled(false); // This will now correctly enable/disable the "Select All" button
+            setProgress(0, false);
+        }
+    });
+
+    // *** FIX #2: More specific and robust selector for the button's action ***
+    ui.btnSelectAll.addEventListener('click', () => {
+        // Find all checkboxes that are specifically inside a row marked for update.
+        document.querySelectorAll('tr.table-warning .tenant-select').forEach(cb => {
+            cb.checked = true;
+        });
+        updateSelectionState();
+    });
+
+    ui.btnUpdate.addEventListener('click', async () => {
+        const contact = {
+            firstName: ui.inputFn.value.trim(),
+            lastName: ui.inputLn.value.trim(),
+            email: ui.inputEmail.value.trim()
+        };
+        if (!contact.firstName || !contact.lastName || !contact.email.includes('@')) {
+            return alert("Please provide valid First Name, Last Name, and Email.");
+        }
+
+        const tenantsToUpdate = Array.from(document.querySelectorAll('.tenant-select:checked')).map(cb => cb.value);
+        if (tenantsToUpdate.length === 0) return;
+        if (!confirm(`Update MCA for ${tenantsToUpdate.length} customers with attester: ${contact.email}?`)) return;
+
+        log(`Starting bulk update for ${tenantsToUpdate.length} tenants...`, 'process');
+        setControlsDisabled(true);
+        ui.updateSpinner.classList.remove('d-none');
+        setProgress(0);
+        let successCount = 0, failCount = 0;
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        for (let i = 0; i < tenantsToUpdate.length; i++) {
+            const tenantId = tenantsToUpdate[i];
+            const row = document.querySelector(`tr[data-tenant-id="${tenantId}"]`);
+            const customerName = row.children[1].textContent;
+            log(`[${i+1}/${tenantsToUpdate.length}] Updating ${customerName}...`);
+            try {
+                await performUpdate(tenantId, globalToken, contact);
+                log(`  -> Success.`, 'success');
+                successCount++;
+                row.classList.remove('table-warning');
+                row.classList.add('table-success');
+                row.querySelector('.mca-status').innerHTML = '<span class="badge bg-success status-badge">Updated</span>';
+                row.querySelector('.mca-date').textContent = todayStr;
+                const cb = row.querySelector('.tenant-select');
+                if (cb) {
+                    cb.checked = false;
+                    cb.remove();
+                }
+                setTimeout(() => row.classList.remove('table-success'), 2000);
+            } catch (error) {
+                log(`  -> Failed: ${error.message}`, 'error');
+                failCount++;
+                row.classList.add('table-danger');
+            }
+            setProgress(((i + 1) / tenantsToUpdate.length) * 100);
+        }
+
+        log(`Bulk update finished. Success: ${successCount}, Failed: ${failCount}.`, 'process');
+        ui.updateSpinner.classList.add('d-none');
+        setControlsDisabled(false);
+        setProgress(0, false);
+        updateSelectionState();
+    });
+</script>
+</body>
+</html>
